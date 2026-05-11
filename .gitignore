@@ -1,0 +1,15 @@
+# .NET
+bin/
+obj/
+*.user
+*.suo
+.vs/
+
+# NuGet
+*.nupkg
+
+# Rider
+.idea/
+
+# VaultSearch generated database (per-vault, rebuild-able)
+**/.obsidian/tools/vaultsearch/db/

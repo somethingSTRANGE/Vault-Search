@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="VaultSearch/VaultSearch.csproj" />
+  <Project Path="VaultSearch.Tests/VaultSearch.Tests.csproj" />
+</Solution>
