@@ -59,6 +59,9 @@ public class AppConfig
     public static string AliasesPath(string dataDir) =>
         Path.Combine(dataDir, "config", "aliases.yaml");
 
+    public static string FmAliasesPath(string dataDir) =>
+        Path.Combine(dataDir, "config", "fm-aliases.yaml");
+
     public static string StopwordsExtraPath(string dataDir) =>
         Path.Combine(dataDir, "config", "stopwords-extra.txt");
 
@@ -86,10 +89,13 @@ public class AppConfig
             """);
 
         WriteStubIfAbsent(StopwordsExtraPath(dataDir), """
-            # stopwords-extra.txt — additional stopwords
+            # stopwords-extra.txt — stopword customization
             # One word per line. Lines starting with # are ignored.
-            # Words listed here are excluded from the word list during rebuild.
-            # The built-in list already covers common English words.
+            # Plain words are added to the built-in stopword list.
+            # Prefix a word with - to remove it from the built-in list.
+            #
+            # Example — make a built-in stopword searchable:
+            # -les
             """);
 
         WriteStubIfAbsent(ScopePath(dataDir), """

@@ -52,16 +52,18 @@ public sealed class SearchCommand : Command<SearchCommand.Settings>
         AnsiConsole.Status().Start("Checking word list...", ctx =>
         {
             ctx.Spinner(Spinner.Known.Dots);
-            if (settings.ForceRebuild || wordListService.IsDirty())
+            if (settings.ForceRebuild || wordListService.IsDirty() || !File.Exists(AppConfig.FmAliasesPath(dataDir)))
             {
                 ctx.Status("Rebuilding word list...");
                 wordListService.Rebuild(stopwords, scope);
+                ctx.Status("Extracting frontmatter aliases...");
+                FmAliasExtractor.Extract(vaultPath, scope, stopwords, AppConfig.FmAliasesPath(dataDir));
             }
         });
 
         var allTokens = wordListService.GetAllTokens();
         var fuzzyService = new FuzzyMatchService(config.FuzzyThreshold);
-        var aliasService = new AliasService(AppConfig.AliasesPath(dataDir));
+        var aliasService = new AliasService(AppConfig.AliasesPath(dataDir), AppConfig.FmAliasesPath(dataDir));
         var ripgrepService = new RipgrepService();
         var searchRoots = scope.GetSearchRoots(vaultPath);
 

@@ -13,13 +13,8 @@ public class RipgrepService
         if (termList.Count == 0) return [];
 
         var args = new List<string> { "--json", "--ignore-case", "--fixed-strings", "--glob", "*.md" };
-        foreach (var term in termList)
-        {
-            args.Add("-e");
-            args.Add(term);
-        }
-        foreach (var root in searchRoots)
-            args.Add(root);
+        foreach (var term in termList) { args.Add("-e"); args.Add(term); }
+        foreach (var root in searchRoots) args.Add(root);
 
         return ParseOutput(RunRg(args));
     }
@@ -28,11 +23,9 @@ public class RipgrepService
     {
         var args = new List<string>
         {
-            "--json", "--ignore-case", "--fixed-strings", "--glob", "*.md",
-            "-e", term
+            "--json", "--ignore-case", "--fixed-strings", "--glob", "*.md", "-e", term
         };
-        foreach (var root in searchRoots)
-            args.Add(root);
+        foreach (var root in searchRoots) args.Add(root);
 
         return ParseOutput(RunRg(args))
             .Select(m => m.FilePath)

@@ -51,18 +51,37 @@ public class ScopeFilter
 
     /// <summary>
     /// Returns explicit directory paths to pass to ripgrep.
-    /// When include rules restrict the scope, returns those directories directly
-    /// (which is faster than globs). Falls back to the vault root when unrestricted.
+    /// When include rules have sub-excludes, expands to immediate subdirectories
+    /// filtered through IsIncluded rather than passing the parent root directly.
+    /// Falls back to the vault root when unrestricted.
     /// </summary>
     public IReadOnlyList<string> GetSearchRoots(string vaultPath)
     {
         if (!HasRules) return [vaultPath];
 
-        var roots = _rules
-            .Where(r => r.Include && r.Pattern != "*")
-            .Select(r => Path.Combine(vaultPath, r.Pattern.Replace('/', Path.DirectorySeparatorChar)))
-            .Where(Directory.Exists)
-            .ToList();
+        var roots = new List<string>();
+        foreach (var (_, pattern) in _rules.Where(r => r.Include && r.Pattern != "*"))
+        {
+            var dir = Path.Combine(vaultPath, pattern.Replace('/', Path.DirectorySeparatorChar));
+            if (!Directory.Exists(dir)) continue;
+
+            var normPattern = pattern.Replace('\\', '/').TrimEnd('/');
+            var hasSubExcludes = _rules.Any(r => !r.Include &&
+                r.Pattern.Replace('\\', '/').StartsWith(normPattern + "/", StringComparison.OrdinalIgnoreCase));
+
+            if (!hasSubExcludes)
+            {
+                roots.Add(dir);
+            }
+            else
+            {
+                foreach (var subDir in Directory.EnumerateDirectories(dir))
+                {
+                    if (IsIncluded(vaultPath, Path.Combine(subDir, "probe.md")))
+                        roots.Add(subDir);
+                }
+            }
+        }
 
         return roots.Count > 0 ? roots : [vaultPath];
     }

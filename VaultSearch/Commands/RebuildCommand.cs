@@ -41,6 +41,8 @@ public sealed class RebuildCommand : Command<RebuildCommand.Settings>
         {
             ctx.Spinner(Spinner.Known.Dots);
             wordListService.Rebuild(stopwords, scope);
+            ctx.Status("Extracting frontmatter aliases...");
+            FmAliasExtractor.Extract(vaultPath, scope, stopwords, AppConfig.FmAliasesPath(dataDir));
             tokenCount = wordListService.GetAllTokens().Count;
         });
 

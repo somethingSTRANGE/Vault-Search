@@ -41,10 +41,12 @@ public sealed class SpellingsCommand : Command<SpellingsCommand.Settings>
         AnsiConsole.Status().Start("Checking word list...", ctx =>
         {
             ctx.Spinner(Spinner.Known.Dots);
-            if (wordListService.IsDirty())
+            if (wordListService.IsDirty() || !File.Exists(AppConfig.FmAliasesPath(dataDir)))
             {
                 ctx.Status("Rebuilding word list...");
                 wordListService.Rebuild(stopwords, scope);
+                ctx.Status("Extracting frontmatter aliases...");
+                FmAliasExtractor.Extract(vaultPath, scope, stopwords, AppConfig.FmAliasesPath(dataDir));
             }
         });
 

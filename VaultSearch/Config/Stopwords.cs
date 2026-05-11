@@ -42,7 +42,10 @@ public static class Stopwords
         foreach (var line in File.ReadAllLines(extraStopwordsPath))
         {
             var word = line.Trim();
-            if (word.Length > 0 && !word.StartsWith('#'))
+            if (word.Length == 0 || word.StartsWith('#')) continue;
+            if (word.StartsWith('-'))
+                combined.Remove(word[1..].Trim());
+            else
                 combined.Add(word);
         }
         return combined;
