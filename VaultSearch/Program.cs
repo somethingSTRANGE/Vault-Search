@@ -9,5 +9,7 @@ app.Configure(config =>
         .WithDescription("Find similar token variants (likely misspellings) in the vault.");
     config.AddCommand<RebuildCommand>("rebuild")
         .WithDescription("Force a full rebuild of the word list.");
+    config.AddCommand<ScopesCommand>("scopes")
+        .WithDescription("List available scope presets.");
 });
 return app.Run(args);
