@@ -77,13 +77,12 @@ public class AppConfig
         WriteStubIfAbsent(AliasesPath(dataDir), """
             # aliases.yaml — semantic query expansion
             # Maps a search token to a list of equivalent terms.
-            # All aliases are searched whenever the key token appears in a query.
+            # The key token is always searched; aliases are added on top.
             #
             # Example:
-            # foo:
-            #   - foo
-            #   - bar
-            #   - baz
+            # nightfall:
+            #   - dusk
+            #   - evening storm
             """);
 
         WriteStubIfAbsent(StopwordsExtraPath(dataDir), """

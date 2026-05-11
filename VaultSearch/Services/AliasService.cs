@@ -27,6 +27,8 @@ public class AliasService
     public IEnumerable<string> Expand(string token)
     {
         token = token.ToLowerInvariant();
-        return _aliases.TryGetValue(token, out var aliases) ? aliases : [token];
+        return _aliases.TryGetValue(token, out var aliases)
+            ? aliases.Prepend(token)
+            : [token];
     }
 }
