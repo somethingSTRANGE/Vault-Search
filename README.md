@@ -6,7 +6,9 @@ A fuzzy keyword search CLI for folders of markdown files. Designed for use with 
 
 - **Fuzzy search** — finds results even when query terms are misspelled or vary slightly
 - **Alias expansion** — map a search token to a set of equivalent terms (synonyms, proper noun variants)
-- **Scope filtering** — restrict indexing and search to specific folders
+- **Frontmatter alias extraction** — automatically reads Obsidian `aliases:` frontmatter and wires them into query expansion at rebuild time
+- **Scope filtering** — restrict indexing and search to specific folders, with named presets for common searches
+- **Frontmatter filtering** — filter results by `type` value or property presence
 - **Misspelling audit** — surface likely spelling variants across your vault
 - **Fast dirty check** — rebuilds the word list only when files have changed
 
@@ -27,9 +29,10 @@ Run from the vault folder, or pass `--vault` to point at it explicitly.
 
 ```
 vault-search "query terms" [--top N] [--vault PATH] [--data PATH] [--rebuild]
+                           [--scope NAME] [--type VALUE] [--property NAME]
 ```
 
-Searches the vault for files matching the query. Each term is fuzzy-expanded against the word list before searching, so near-matches are included automatically.
+Searches the vault for files matching the query. Each term is fuzzy-expanded against the word list before searching, so near-matches are included automatically. Frontmatter `aliases:` properties are extracted at rebuild time and merged into query expansion.
 
 | Option | Default | Description |
 |---|---|---|
@@ -37,11 +40,17 @@ Searches the vault for files matching the query. Each term is fuzzy-expanded aga
 | `--vault PATH` | current directory | Path to the vault folder |
 | `--data PATH` | auto-detected | Path to the data directory (DB and config) |
 | `--rebuild` | — | Force a word list rebuild before searching |
+| `--scope NAME` | — | Named search scope preset (loads `scope-<name>.txt`) |
+| `--type VALUE` | — | Filter results to files where frontmatter `type` matches this value |
+| `--property NAME` | — | Filter results to files that have this frontmatter property set (any value) |
+
+`--type` and `--property` are applied before the top N cutoff, so you always get up to N results from the matching set.
 
 ### Spellings
 
 ```
 vault-search spellings [token] [--vault PATH] [--data PATH] [--threshold N]
+                               [--scope NAME] [--type VALUE] [--property NAME]
 ```
 
 Without a token, audits the entire word list for likely misspellings — tokens that appear rarely and are similar to a much more frequent token. With a token, shows all similar variants of that specific word.
@@ -51,6 +60,9 @@ Without a token, audits the entire word list for likely misspellings — tokens 
 | `--threshold N` | `20` | Minimum frequency for a token to be treated as canonical |
 | `--vault PATH` | current directory | Path to the vault folder |
 | `--data PATH` | auto-detected | Path to the data directory |
+| `--scope NAME` | — | Named search scope preset |
+| `--type VALUE` | — | Filter file results by frontmatter `type` value |
+| `--property NAME` | — | Filter file results to files with this frontmatter property |
 
 ### Rebuild
 
@@ -58,7 +70,15 @@ Without a token, audits the entire word list for likely misspellings — tokens 
 vault-search rebuild [--vault PATH] [--data PATH]
 ```
 
-Forces a full rebuild of the word list index regardless of whether files appear to have changed.
+Forces a full rebuild of the word list index and re-extracts frontmatter aliases, regardless of whether files appear to have changed.
+
+### Scopes
+
+```
+vault-search scopes [--vault PATH] [--data PATH]
+```
+
+Lists available scope presets. Shows the default `scope.txt` and any named presets (`scope-<name>.txt`) with the exact flag needed to use each one.
 
 ## Data directory
 
@@ -77,11 +97,11 @@ The data directory contains two subdirectories:
 
 ## Configuration
 
-On first run, vault-search writes commented stub files to the `config/` directory. Edit them to customize behaviour.
+On first run, vault-search writes commented stub files to the `config/` directory. Edit them to customise behaviour.
 
 ### `aliases.yaml` — semantic query expansion
 
-Maps a search token to a list of equivalent terms. All aliases are searched whenever the key appears in a query. Use this for synonyms, alternate spellings, or multi-word phrases that fuzzy matching cannot handle.
+Maps a search token to a list of equivalent terms. The key token is always searched; aliases are added on top. Use this for synonyms, alternate spellings, or multi-word phrases that fuzzy matching cannot handle.
 
 ```yaml
 nightfall:
@@ -89,13 +109,20 @@ nightfall:
   - evening storm
 ```
 
-### `stopwords-extra.txt` — additional stopwords
+### `fm-aliases.yaml` — auto-generated frontmatter aliases
 
-One word per line. Words listed here are excluded from the word list during rebuild. The built-in list already covers common English words; use this file for domain-specific terms you want to suppress.
+Generated automatically during every rebuild from the `aliases:` frontmatter property of your markdown files. **Do not edit** — changes will be overwritten. Each token from a file's name is mapped to the tokens extracted from its frontmatter aliases list.
+
+### `stopwords-extra.txt` — stopword customisation
+
+One word per line. Lines starting with `#` are ignored. Plain words are added to the built-in stopword list. Prefix a word with `-` to remove it from the built-in list.
 
 ```
+# Add a custom stopword:
 lorem
-ipsum
+
+# Remove a built-in stopword (e.g. to make a character name searchable):
+-les
 ```
 
 ### `scope.txt` — folder include/exclude rules
@@ -107,14 +134,33 @@ Controls which folders are indexed and searched. Rules are applied top-to-bottom
 -*
 +Projects
 +Areas
+
+# Sub-exclude a noisy subfolder:
+-Areas/Archive
 ```
 
-Patterns match folder names at any depth prefix. `*` matches everything.
+#### Named scope presets
+
+Create additional scope files as `scope-<name>.txt` to define reusable search presets. Select a preset at search time with `--scope <name>`. The default `scope.txt` is always used for rebuilding; named scopes only affect which folders ripgrep searches.
+
+```
+# config/scope-characters.txt
+-*
++Areas/Characters
+```
+
+```
+vault-search "father" --scope characters --type profile
+```
+
+Use `vault-search scopes` to list all available presets.
 
 ## How it works
 
 1. **Dirty check** — scans file modification times; skips rebuild if nothing has changed
-2. **Rebuild** — tokenizes all `.md` file contents and filenames into a SQLite word list, stripping stopwords
-3. **Query expansion** — each query token is expanded via the alias dictionary and fuzzy-matched against the word list; all candidates are searched
-4. **Search** — ripgrep searches the vault (or scoped folders) for the expanded term set
-5. **Rank** — results are scored by number of matching terms and returned as a ranked table
+2. **Rebuild** — tokenizes all `.md` file contents and filenames into a SQLite word list, stripping stopwords; extracts frontmatter `aliases:` into `fm-aliases.yaml`
+3. **Query expansion** — each query token is expanded via the alias dictionaries (user and frontmatter) and fuzzy-matched against the word list; all candidates are searched
+4. **Scope** — if a named `--scope` is given, only the folders defined in that preset are searched; otherwise the default `scope.txt` applies
+5. **Search** — ripgrep searches the scoped folders for the expanded term set
+6. **Filter** — `--type` and `--property` filter results by frontmatter before the top N cutoff
+7. **Rank** — results are scored by number of matching terms and returned as a ranked table
