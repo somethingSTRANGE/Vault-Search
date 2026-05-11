@@ -7,6 +7,9 @@
     <Nullable>enable</Nullable>
     <AssemblyName>vault-search</AssemblyName>
     <PublishSingleFile>true</PublishSingleFile>
+    <Company>Strange</Company>
+    <Product>Vault Search</Product>
+    <Description>Fuzzy keyword search CLI for folders of markdown files.</Description>
   </PropertyGroup>
 
   <ItemGroup>
