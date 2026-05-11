@@ -15,8 +15,12 @@ public sealed class SpellingsCommand : Command<SpellingsCommand.Settings>
         public string? Token { get; init; }
 
         [CommandOption("--vault")]
-        [Description("Path to the vault folder (overrides configured default).")]
+        [Description("Path to the vault folder. Defaults to current directory.")]
         public string? VaultPath { get; init; }
+
+        [CommandOption("--data")]
+        [Description("Path to the data directory (DB and config). Defaults to auto-detected location.")]
+        public string? DataPath { get; init; }
 
         [CommandOption("--threshold|-t")]
         [Description("Minimum frequency for canonical tokens in audit mode.")]
@@ -26,16 +30,13 @@ public sealed class SpellingsCommand : Command<SpellingsCommand.Settings>
     protected override int Execute(CommandContext context, Settings settings, CancellationToken cancellationToken)
     {
         var config = AppConfig.Load();
-        var vaultPath = settings.VaultPath ?? config.DefaultVaultPath;
+        var vaultPath = settings.VaultPath ?? Directory.GetCurrentDirectory();
+        var dataDir = AppConfig.ResolveDataDir(vaultPath, settings.DataPath);
 
-        if (string.IsNullOrWhiteSpace(vaultPath))
-        {
-            AnsiConsole.MarkupLine("[red]No vault path specified. Set DefaultVaultPath in config or use --vault.[/]");
-            return 1;
-        }
-
-        var stopwords = Stopwords.GetAll(AppConfig.StopwordsExtraPath(vaultPath));
-        var wordListService = new WordListService(vaultPath);
+        AppConfig.EnsureConfigStubs(dataDir);
+        var scope = ScopeFilter.Load(AppConfig.ScopePath(dataDir));
+        var stopwords = Stopwords.GetAll(AppConfig.StopwordsExtraPath(dataDir));
+        var wordListService = new WordListService(vaultPath, AppConfig.DbPath(dataDir));
 
         AnsiConsole.Status().Start("Checking word list...", ctx =>
         {
@@ -43,18 +44,19 @@ public sealed class SpellingsCommand : Command<SpellingsCommand.Settings>
             if (wordListService.IsDirty())
             {
                 ctx.Status("Rebuilding word list...");
-                wordListService.Rebuild(stopwords);
+                wordListService.Rebuild(stopwords, scope);
             }
         });
 
         var allTokens = wordListService.GetAllTokens();
         var fuzzyService = new FuzzyMatchService(config.FuzzyThreshold);
         var ripgrepService = new RipgrepService();
+        var searchRoots = scope.GetSearchRoots(vaultPath);
 
         if (settings.Token is not null)
-            RunSingleToken(settings.Token, allTokens, fuzzyService, ripgrepService, vaultPath);
+            RunSingleToken(settings.Token, allTokens, fuzzyService, ripgrepService, searchRoots, vaultPath);
         else
-            RunAudit(allTokens, fuzzyService, ripgrepService, vaultPath,
+            RunAudit(allTokens, fuzzyService, ripgrepService, searchRoots, vaultPath,
                 settings.FrequencyThreshold ?? config.SpellingsFrequencyThreshold,
                 config.SpellingsMisspellingRatio);
 
@@ -66,6 +68,7 @@ public sealed class SpellingsCommand : Command<SpellingsCommand.Settings>
         IReadOnlyList<(string Token, int Frequency)> allTokens,
         FuzzyMatchService fuzzyService,
         RipgrepService ripgrepService,
+        IReadOnlyList<string> searchRoots,
         string vaultPath)
     {
         var similar = fuzzyService.FindSimilar(token, allTokens, excludeExact: true);
@@ -86,7 +89,7 @@ public sealed class SpellingsCommand : Command<SpellingsCommand.Settings>
 
         foreach (var (similarToken, score, freq) in similar)
         {
-            var files = ripgrepService.FilesContaining(vaultPath, similarToken);
+            var files = ripgrepService.FilesContaining(searchRoots, similarToken);
             var fileList = FormatFileList(files, vaultPath);
             table.AddRow(
                 Markup.Escape(similarToken),
@@ -102,6 +105,7 @@ public sealed class SpellingsCommand : Command<SpellingsCommand.Settings>
         IReadOnlyList<(string Token, int Frequency)> allTokens,
         FuzzyMatchService fuzzyService,
         RipgrepService ripgrepService,
+        IReadOnlyList<string> searchRoots,
         string vaultPath,
         int frequencyThreshold,
         double misspellingRatio)
@@ -125,7 +129,7 @@ public sealed class SpellingsCommand : Command<SpellingsCommand.Settings>
 
         foreach (var (canonical, canonicalFreq, variant, variantFreq) in misspellings)
         {
-            var files = ripgrepService.FilesContaining(vaultPath, variant);
+            var files = ripgrepService.FilesContaining(searchRoots, variant);
             var fileList = FormatFileList(files, vaultPath);
             table.AddRow(
                 Markup.Escape(canonical),

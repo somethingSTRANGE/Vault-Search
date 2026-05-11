@@ -12,4 +12,7 @@ obj/
 .idea/
 
 # VaultSearch generated database (per-vault, rebuild-able)
-**/.obsidian/tools/vaultsearch/db/
+**/.obsidian/tools/vault-search/db/
+
+# Claude Code project memory
+.claude/

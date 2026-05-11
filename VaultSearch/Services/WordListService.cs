@@ -1,6 +1,5 @@
 using System.Text.RegularExpressions;
 using Microsoft.Data.Sqlite;
-using VaultSearch.Config;
 
 namespace VaultSearch.Services;
 
@@ -13,10 +12,10 @@ public class WordListService
     private readonly string _dbPath;
     private readonly string _vaultPath;
 
-    public WordListService(string vaultPath)
+    public WordListService(string vaultPath, string dbPath)
     {
         _vaultPath = vaultPath;
-        _dbPath = AppConfig.DbPath(vaultPath);
+        _dbPath = dbPath;
     }
 
     public bool IsDirty()
@@ -28,13 +27,7 @@ public class WordListService
             .Any(f => File.GetLastWriteTimeUtc(f) > lastBuilt.Value);
     }
 
-    public void EnsureFresh(IReadOnlySet<string> stopwords, bool forceRebuild = false)
-    {
-        if (forceRebuild || IsDirty())
-            Rebuild(stopwords);
-    }
-
-    public void Rebuild(IReadOnlySet<string> stopwords)
+    public void Rebuild(IReadOnlySet<string> stopwords, ScopeFilter scope)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(_dbPath)!);
 
@@ -52,7 +45,8 @@ public class WordListService
 
         var counts = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var file in Directory.EnumerateFiles(_vaultPath, "*.md", SearchOption.AllDirectories))
+        foreach (var file in Directory.EnumerateFiles(_vaultPath, "*.md", SearchOption.AllDirectories)
+                     .Where(f => scope.IsIncluded(_vaultPath, f)))
         {
             IndexFilename(file, counts, stopwords);
             IndexContent(file, counts, stopwords);

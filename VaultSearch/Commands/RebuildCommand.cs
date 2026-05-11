@@ -11,20 +11,19 @@ public sealed class RebuildCommand : Command<RebuildCommand.Settings>
     public sealed class Settings : CommandSettings
     {
         [CommandOption("--vault")]
-        [Description("Path to the vault folder (overrides configured default).")]
+        [Description("Path to the vault folder. Defaults to current directory.")]
         public string? VaultPath { get; init; }
+
+        [CommandOption("--data")]
+        [Description("Path to the data directory (DB and config). Defaults to auto-detected location.")]
+        public string? DataPath { get; init; }
     }
 
     protected override int Execute(CommandContext context, Settings settings, CancellationToken cancellationToken)
     {
         var config = AppConfig.Load();
-        var vaultPath = settings.VaultPath ?? config.DefaultVaultPath;
-
-        if (string.IsNullOrWhiteSpace(vaultPath))
-        {
-            AnsiConsole.MarkupLine("[red]No vault path specified. Set DefaultVaultPath in config or use --vault.[/]");
-            return 1;
-        }
+        var vaultPath = settings.VaultPath ?? Directory.GetCurrentDirectory();
+        var dataDir = AppConfig.ResolveDataDir(vaultPath, settings.DataPath);
 
         if (!Directory.Exists(vaultPath))
         {
@@ -32,14 +31,16 @@ public sealed class RebuildCommand : Command<RebuildCommand.Settings>
             return 1;
         }
 
-        var stopwords = Stopwords.GetAll(AppConfig.StopwordsExtraPath(vaultPath));
-        var wordListService = new WordListService(vaultPath);
+        AppConfig.EnsureConfigStubs(dataDir);
+        var scope = ScopeFilter.Load(AppConfig.ScopePath(dataDir));
+        var stopwords = Stopwords.GetAll(AppConfig.StopwordsExtraPath(dataDir));
+        var wordListService = new WordListService(vaultPath, AppConfig.DbPath(dataDir));
         var tokenCount = 0;
 
         AnsiConsole.Status().Start("Rebuilding word list...", ctx =>
         {
             ctx.Spinner(Spinner.Known.Dots);
-            wordListService.Rebuild(stopwords);
+            wordListService.Rebuild(stopwords, scope);
             tokenCount = wordListService.GetAllTokens().Count;
         });
 

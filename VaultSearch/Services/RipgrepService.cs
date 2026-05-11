@@ -7,7 +7,7 @@ public record RipgrepMatch(string FilePath, int LineNumber, string Line);
 
 public class RipgrepService
 {
-    public IReadOnlyList<RipgrepMatch> Search(string vaultPath, IEnumerable<string> terms)
+    public IReadOnlyList<RipgrepMatch> Search(IReadOnlyList<string> searchRoots, IEnumerable<string> terms)
     {
         var termList = terms.ToList();
         if (termList.Count == 0) return [];
@@ -18,18 +18,21 @@ public class RipgrepService
             args.Add("-e");
             args.Add(term);
         }
-        args.Add(vaultPath);
+        foreach (var root in searchRoots)
+            args.Add(root);
 
         return ParseOutput(RunRg(args));
     }
 
-    public IReadOnlyList<string> FilesContaining(string vaultPath, string term)
+    public IReadOnlyList<string> FilesContaining(IReadOnlyList<string> searchRoots, string term)
     {
         var args = new List<string>
         {
             "--json", "--ignore-case", "--fixed-strings", "--glob", "*.md",
-            "-e", term, vaultPath
+            "-e", term
         };
+        foreach (var root in searchRoots)
+            args.Add(root);
 
         return ParseOutput(RunRg(args))
             .Select(m => m.FilePath)

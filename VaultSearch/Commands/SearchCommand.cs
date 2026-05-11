@@ -20,8 +20,12 @@ public sealed class SearchCommand : Command<SearchCommand.Settings>
         public int Top { get; init; } = 10;
 
         [CommandOption("--vault")]
-        [Description("Path to the vault folder (overrides configured default).")]
+        [Description("Path to the vault folder. Defaults to current directory.")]
         public string? VaultPath { get; init; }
+
+        [CommandOption("--data")]
+        [Description("Path to the data directory (DB and config). Defaults to auto-detected location.")]
+        public string? DataPath { get; init; }
 
         [CommandOption("--rebuild")]
         [Description("Force a rebuild of the word list before searching.")]
@@ -31,13 +35,8 @@ public sealed class SearchCommand : Command<SearchCommand.Settings>
     protected override int Execute(CommandContext context, Settings settings, CancellationToken cancellationToken)
     {
         var config = AppConfig.Load();
-        var vaultPath = settings.VaultPath ?? config.DefaultVaultPath;
-
-        if (string.IsNullOrWhiteSpace(vaultPath))
-        {
-            AnsiConsole.MarkupLine("[red]No vault path specified. Set DefaultVaultPath in config or use --vault.[/]");
-            return 1;
-        }
+        var vaultPath = settings.VaultPath ?? Directory.GetCurrentDirectory();
+        var dataDir = AppConfig.ResolveDataDir(vaultPath, settings.DataPath);
 
         if (!Directory.Exists(vaultPath))
         {
@@ -45,8 +44,10 @@ public sealed class SearchCommand : Command<SearchCommand.Settings>
             return 1;
         }
 
-        var stopwords = Stopwords.GetAll(AppConfig.StopwordsExtraPath(vaultPath));
-        var wordListService = new WordListService(vaultPath);
+        AppConfig.EnsureConfigStubs(dataDir);
+        var scope = ScopeFilter.Load(AppConfig.ScopePath(dataDir));
+        var stopwords = Stopwords.GetAll(AppConfig.StopwordsExtraPath(dataDir));
+        var wordListService = new WordListService(vaultPath, AppConfig.DbPath(dataDir));
 
         AnsiConsole.Status().Start("Checking word list...", ctx =>
         {
@@ -54,14 +55,15 @@ public sealed class SearchCommand : Command<SearchCommand.Settings>
             if (settings.ForceRebuild || wordListService.IsDirty())
             {
                 ctx.Status("Rebuilding word list...");
-                wordListService.Rebuild(stopwords);
+                wordListService.Rebuild(stopwords, scope);
             }
         });
 
         var allTokens = wordListService.GetAllTokens();
         var fuzzyService = new FuzzyMatchService(config.FuzzyThreshold);
-        var aliasService = new AliasService(AppConfig.AliasesPath(vaultPath));
+        var aliasService = new AliasService(AppConfig.AliasesPath(dataDir));
         var ripgrepService = new RipgrepService();
+        var searchRoots = scope.GetSearchRoots(vaultPath);
 
         var queryTokens = settings.Query.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         var expandedTerms = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -74,7 +76,7 @@ public sealed class SearchCommand : Command<SearchCommand.Settings>
                 expandedTerms.Add(match);
         }
 
-        var matches = ripgrepService.Search(vaultPath, expandedTerms);
+        var matches = ripgrepService.Search(searchRoots, expandedTerms);
         if (matches.Count == 0)
         {
             AnsiConsole.MarkupLine("[yellow]No results found.[/]");
