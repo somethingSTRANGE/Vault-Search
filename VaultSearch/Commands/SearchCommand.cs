@@ -30,6 +30,18 @@ public sealed class SearchCommand : Command<SearchCommand.Settings>
         [CommandOption("--rebuild")]
         [Description("Force a rebuild of the word list before searching.")]
         public bool ForceRebuild { get; init; }
+
+        [CommandOption("--scope|-s")]
+        [Description("Named search scope preset. Loads scope-<name>.txt from the config directory.")]
+        public string? ScopeName { get; init; }
+
+        [CommandOption("--type")]
+        [Description("Filter results to files where frontmatter 'type' matches this value.")]
+        public string? TypeFilter { get; init; }
+
+        [CommandOption("--property")]
+        [Description("Filter results to files that have this frontmatter property set (any value).")]
+        public string? PropertyFilter { get; init; }
     }
 
     protected override int Execute(CommandContext context, Settings settings, CancellationToken cancellationToken)
@@ -61,11 +73,27 @@ public sealed class SearchCommand : Command<SearchCommand.Settings>
             }
         });
 
+        ScopeFilter searchScope;
+        if (settings.ScopeName is not null)
+        {
+            var namedScopePath = AppConfig.ScopePath(dataDir, settings.ScopeName);
+            if (!File.Exists(namedScopePath))
+            {
+                AnsiConsole.MarkupLine($"[red]Scope preset '{Markup.Escape(settings.ScopeName)}' not found: {Markup.Escape(namedScopePath)}[/]");
+                return 1;
+            }
+            searchScope = ScopeFilter.Load(namedScopePath);
+        }
+        else
+        {
+            searchScope = scope;
+        }
+
         var allTokens = wordListService.GetAllTokens();
         var fuzzyService = new FuzzyMatchService(config.FuzzyThreshold);
         var aliasService = new AliasService(AppConfig.AliasesPath(dataDir), AppConfig.FmAliasesPath(dataDir));
         var ripgrepService = new RipgrepService();
-        var searchRoots = scope.GetSearchRoots(vaultPath);
+        var searchRoots = searchScope.GetSearchRoots(vaultPath);
 
         var queryTokens = settings.Query.Split(' ', StringSplitOptions.RemoveEmptyEntries);
         var expandedTerms = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -87,11 +115,12 @@ public sealed class SearchCommand : Command<SearchCommand.Settings>
 
         var scored = matches
             .GroupBy(m => m.FilePath, StringComparer.OrdinalIgnoreCase)
-            .Select(g =>
-            {
-                var excerpt = g.First().Line;
-                return (FilePath: g.Key, MatchCount: g.Count(), Excerpt: excerpt);
-            })
+            .Select(g => (FilePath: g.Key, MatchCount: g.Count(), Excerpt: g.First().Line))
+            .Where(r => settings.TypeFilter is null ||
+                        FmAliasExtractor.ReadProperty(r.FilePath, "type")
+                            ?.Equals(settings.TypeFilter, StringComparison.OrdinalIgnoreCase) == true)
+            .Where(r => settings.PropertyFilter is null ||
+                        FmAliasExtractor.HasProperty(r.FilePath, settings.PropertyFilter))
             .OrderByDescending(r => r.MatchCount)
             .Take(settings.Top)
             .ToList();

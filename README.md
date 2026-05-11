@@ -1,4 +1,4 @@
-# vault-search
+# Vault Search
 
 A fuzzy keyword search CLI for folders of markdown files. Designed for use with AI assistants (such as Claude Code) that need to search a vault from the terminal, but equally useful as a standalone tool.
 

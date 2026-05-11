@@ -25,6 +25,18 @@ public sealed class SpellingsCommand : Command<SpellingsCommand.Settings>
         [CommandOption("--threshold|-t")]
         [Description("Minimum frequency for canonical tokens in audit mode.")]
         public int? FrequencyThreshold { get; init; }
+
+        [CommandOption("--scope|-s")]
+        [Description("Named search scope preset. Loads scope-<name>.txt from the config directory.")]
+        public string? ScopeName { get; init; }
+
+        [CommandOption("--type")]
+        [Description("Filter file results to files where frontmatter 'type' matches this value.")]
+        public string? TypeFilter { get; init; }
+
+        [CommandOption("--property")]
+        [Description("Filter file results to files that have this frontmatter property set (any value).")]
+        public string? PropertyFilter { get; init; }
     }
 
     protected override int Execute(CommandContext context, Settings settings, CancellationToken cancellationToken)
@@ -50,17 +62,35 @@ public sealed class SpellingsCommand : Command<SpellingsCommand.Settings>
             }
         });
 
+        ScopeFilter searchScope;
+        if (settings.ScopeName is not null)
+        {
+            var namedScopePath = AppConfig.ScopePath(dataDir, settings.ScopeName);
+            if (!File.Exists(namedScopePath))
+            {
+                AnsiConsole.MarkupLine($"[red]Scope preset '{Markup.Escape(settings.ScopeName)}' not found: {Markup.Escape(namedScopePath)}[/]");
+                return 1;
+            }
+            searchScope = ScopeFilter.Load(namedScopePath);
+        }
+        else
+        {
+            searchScope = scope;
+        }
+
         var allTokens = wordListService.GetAllTokens();
         var fuzzyService = new FuzzyMatchService(config.FuzzyThreshold);
         var ripgrepService = new RipgrepService();
-        var searchRoots = scope.GetSearchRoots(vaultPath);
+        var searchRoots = searchScope.GetSearchRoots(vaultPath);
 
         if (settings.Token is not null)
-            RunSingleToken(settings.Token, allTokens, fuzzyService, ripgrepService, searchRoots, vaultPath);
+            RunSingleToken(settings.Token, allTokens, fuzzyService, ripgrepService, searchRoots, vaultPath,
+                settings.TypeFilter, settings.PropertyFilter);
         else
             RunAudit(allTokens, fuzzyService, ripgrepService, searchRoots, vaultPath,
                 settings.FrequencyThreshold ?? config.SpellingsFrequencyThreshold,
-                config.SpellingsMisspellingRatio);
+                config.SpellingsMisspellingRatio,
+                settings.TypeFilter, settings.PropertyFilter);
 
         return 0;
     }
@@ -71,7 +101,9 @@ public sealed class SpellingsCommand : Command<SpellingsCommand.Settings>
         FuzzyMatchService fuzzyService,
         RipgrepService ripgrepService,
         IReadOnlyList<string> searchRoots,
-        string vaultPath)
+        string vaultPath,
+        string? typeFilter,
+        string? propertyFilter)
     {
         var similar = fuzzyService.FindSimilar(token, allTokens, excludeExact: true);
 
@@ -91,7 +123,12 @@ public sealed class SpellingsCommand : Command<SpellingsCommand.Settings>
 
         foreach (var (similarToken, score, freq) in similar)
         {
-            var files = ripgrepService.FilesContaining(searchRoots, similarToken);
+            var files = ripgrepService.FilesContaining(searchRoots, similarToken)
+                .Where(f => typeFilter is null ||
+                            FmAliasExtractor.ReadProperty(f, "type")
+                                ?.Equals(typeFilter, StringComparison.OrdinalIgnoreCase) == true)
+                .Where(f => propertyFilter is null || FmAliasExtractor.HasProperty(f, propertyFilter))
+                .ToList();
             var fileList = FormatFileList(files, vaultPath);
             table.AddRow(
                 Markup.Escape(similarToken),
@@ -110,7 +147,9 @@ public sealed class SpellingsCommand : Command<SpellingsCommand.Settings>
         IReadOnlyList<string> searchRoots,
         string vaultPath,
         int frequencyThreshold,
-        double misspellingRatio)
+        double misspellingRatio,
+        string? typeFilter,
+        string? propertyFilter)
     {
         var misspellings = fuzzyService.FindMisspellings(allTokens, frequencyThreshold, misspellingRatio);
 
@@ -131,7 +170,12 @@ public sealed class SpellingsCommand : Command<SpellingsCommand.Settings>
 
         foreach (var (canonical, canonicalFreq, variant, variantFreq) in misspellings)
         {
-            var files = ripgrepService.FilesContaining(searchRoots, variant);
+            var files = ripgrepService.FilesContaining(searchRoots, variant)
+                .Where(f => typeFilter is null ||
+                            FmAliasExtractor.ReadProperty(f, "type")
+                                ?.Equals(typeFilter, StringComparison.OrdinalIgnoreCase) == true)
+                .Where(f => propertyFilter is null || FmAliasExtractor.HasProperty(f, propertyFilter))
+                .ToList();
             var fileList = FormatFileList(files, vaultPath);
             table.AddRow(
                 Markup.Escape(canonical),

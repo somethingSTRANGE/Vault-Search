@@ -65,8 +65,10 @@ public class AppConfig
     public static string StopwordsExtraPath(string dataDir) =>
         Path.Combine(dataDir, "config", "stopwords-extra.txt");
 
-    public static string ScopePath(string dataDir) =>
-        Path.Combine(dataDir, "config", "scope.txt");
+    public static string ScopePath(string dataDir, string? scopeName = null) =>
+        scopeName is null
+            ? Path.Combine(dataDir, "config", "scope.txt")
+            : Path.Combine(dataDir, "config", $"scope-{scopeName}.txt");
 
     /// <summary>
     /// Creates the config directory and writes commented stub files if they don't already exist.
@@ -102,6 +104,8 @@ public class AppConfig
             # scope.txt — folder include/exclude rules
             # Rules are applied top-to-bottom; last matching rule wins.
             # With no active rules (all lines commented), all folders are included.
+            # Named scope presets can be created as scope-<name>.txt (e.g. scope-characters.txt)
+            # and selected at search time with --scope <name>.
             #
             # Example — index and search only specific folders:
             # -*

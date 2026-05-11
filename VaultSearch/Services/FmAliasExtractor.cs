@@ -51,6 +51,43 @@ public static class FmAliasExtractor
         Write(mapping, outputPath);
     }
 
+    public static string? ReadProperty(string filePath, string propertyName)
+    {
+        try
+        {
+            using var reader = new StreamReader(filePath);
+            if (reader.ReadLine()?.Trim() != "---") return null;
+            string? line;
+            while ((line = reader.ReadLine()) != null && line.Trim() != "---")
+            {
+                var colonIdx = line.IndexOf(':');
+                if (colonIdx < 0) continue;
+                if (line[..colonIdx].Trim().Equals(propertyName, StringComparison.OrdinalIgnoreCase))
+                    return line[(colonIdx + 1)..].Trim();
+            }
+        }
+        catch { }
+        return null;
+    }
+
+    public static bool HasProperty(string filePath, string propertyName)
+    {
+        try
+        {
+            using var reader = new StreamReader(filePath);
+            if (reader.ReadLine()?.Trim() != "---") return false;
+            string? line;
+            while ((line = reader.ReadLine()) != null && line.Trim() != "---")
+            {
+                var colonIdx = line.IndexOf(':');
+                if (colonIdx >= 0 && line[..colonIdx].Trim().Equals(propertyName, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+        }
+        catch { }
+        return false;
+    }
+
     private static List<string> ReadFrontmatterAliases(string filePath)
     {
         try
