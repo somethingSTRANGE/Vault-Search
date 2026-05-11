@@ -42,6 +42,10 @@ public sealed class SearchCommand : Command<SearchCommand.Settings>
         [CommandOption("--property")]
         [Description("Filter results to files that have this frontmatter property set (any value).")]
         public string? PropertyFilter { get; init; }
+
+        [CommandOption("--pretty")]
+        [Description("Render results as a formatted table instead of plain structured text.")]
+        public bool Pretty { get; init; }
     }
 
     protected override int Execute(CommandContext context, Settings settings, CancellationToken cancellationToken)
@@ -125,26 +129,42 @@ public sealed class SearchCommand : Command<SearchCommand.Settings>
             .Take(settings.Top)
             .ToList();
 
-        var table = new Table()
-            .Border(TableBorder.Simple)
-            .AddColumn(new TableColumn("#").RightAligned())
-            .AddColumn("File")
-            .AddColumn(new TableColumn("Matches").RightAligned())
-            .AddColumn("Excerpt");
-
-        for (var i = 0; i < scored.Count; i++)
+        if (settings.Pretty)
         {
-            var (filePath, matchCount, excerpt) = scored[i];
-            var relativePath = Path.GetRelativePath(vaultPath, filePath);
-            var truncated = excerpt.Length > 80 ? excerpt[..77] + "..." : excerpt;
-            table.AddRow(
-                $"{i + 1}",
-                Markup.Escape(relativePath),
-                matchCount.ToString(),
-                Markup.Escape(truncated));
+            var table = new Table()
+                .Border(TableBorder.Simple)
+                .AddColumn(new TableColumn("#").RightAligned())
+                .AddColumn("File")
+                .AddColumn(new TableColumn("Matches").RightAligned())
+                .AddColumn("Excerpt");
+
+            for (var i = 0; i < scored.Count; i++)
+            {
+                var (filePath, matchCount, excerpt) = scored[i];
+                var relativePath = Path.GetRelativePath(vaultPath, filePath);
+                var truncated = excerpt.Length > 80 ? excerpt[..77] + "..." : excerpt;
+                table.AddRow(
+                    $"{i + 1}",
+                    Markup.Escape(relativePath),
+                    matchCount.ToString(),
+                    Markup.Escape(truncated));
+            }
+
+            AnsiConsole.Write(table);
+        }
+        else
+        {
+            for (var i = 0; i < scored.Count; i++)
+            {
+                var (filePath, matchCount, excerpt) = scored[i];
+                var relativePath = Path.GetRelativePath(vaultPath, filePath);
+                AnsiConsole.WriteLine($"{i + 1}. {relativePath} ({matchCount} matches)");
+                AnsiConsole.WriteLine($"   {excerpt}");
+                if (i < scored.Count - 1)
+                    AnsiConsole.WriteLine();
+            }
         }
 
-        AnsiConsole.Write(table);
         return 0;
     }
 }

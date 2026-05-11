@@ -37,6 +37,10 @@ public sealed class SpellingsCommand : Command<SpellingsCommand.Settings>
         [CommandOption("--property")]
         [Description("Filter file results to files that have this frontmatter property set (any value).")]
         public string? PropertyFilter { get; init; }
+
+        [CommandOption("--pretty")]
+        [Description("Render results as a formatted table instead of plain structured text.")]
+        public bool Pretty { get; init; }
     }
 
     protected override int Execute(CommandContext context, Settings settings, CancellationToken cancellationToken)
@@ -85,12 +89,12 @@ public sealed class SpellingsCommand : Command<SpellingsCommand.Settings>
 
         if (settings.Token is not null)
             RunSingleToken(settings.Token, allTokens, fuzzyService, ripgrepService, searchRoots, vaultPath,
-                settings.TypeFilter, settings.PropertyFilter);
+                settings.TypeFilter, settings.PropertyFilter, settings.Pretty);
         else
             RunAudit(allTokens, fuzzyService, ripgrepService, searchRoots, vaultPath,
                 settings.FrequencyThreshold ?? config.SpellingsFrequencyThreshold,
                 config.SpellingsMisspellingRatio,
-                settings.TypeFilter, settings.PropertyFilter);
+                settings.TypeFilter, settings.PropertyFilter, settings.Pretty);
 
         return 0;
     }
@@ -103,7 +107,8 @@ public sealed class SpellingsCommand : Command<SpellingsCommand.Settings>
         IReadOnlyList<string> searchRoots,
         string vaultPath,
         string? typeFilter,
-        string? propertyFilter)
+        string? propertyFilter,
+        bool pretty)
     {
         var similar = fuzzyService.FindSimilar(token, allTokens, excludeExact: true);
 
@@ -113,31 +118,47 @@ public sealed class SpellingsCommand : Command<SpellingsCommand.Settings>
             return;
         }
 
-        var table = new Table()
-            .Border(TableBorder.Simple)
-            .Title($"Similar to '{Markup.Escape(token)}'")
-            .AddColumn("Token")
-            .AddColumn(new TableColumn("Score").RightAligned())
-            .AddColumn(new TableColumn("Freq").RightAligned())
-            .AddColumn("Files");
-
-        foreach (var (similarToken, score, freq) in similar)
+        var rows = similar.Select(t =>
         {
-            var files = ripgrepService.FilesContaining(searchRoots, similarToken)
+            var files = ripgrepService.FilesContaining(searchRoots, t.Token)
                 .Where(f => typeFilter is null ||
                             FmAliasExtractor.ReadProperty(f, "type")
                                 ?.Equals(typeFilter, StringComparison.OrdinalIgnoreCase) == true)
                 .Where(f => propertyFilter is null || FmAliasExtractor.HasProperty(f, propertyFilter))
                 .ToList();
-            var fileList = FormatFileList(files, vaultPath);
-            table.AddRow(
-                Markup.Escape(similarToken),
-                score.ToString(),
-                freq.ToString(),
-                Markup.Escape(fileList));
-        }
+            return (t.Token, t.Score, t.Frequency, Files: files);
+        }).ToList();
 
-        AnsiConsole.Write(table);
+        if (pretty)
+        {
+            var table = new Table()
+                .Border(TableBorder.Simple)
+                .Title($"Similar to '{Markup.Escape(token)}'")
+                .AddColumn("Token")
+                .AddColumn(new TableColumn("Score").RightAligned())
+                .AddColumn(new TableColumn("Freq").RightAligned())
+                .AddColumn("Files");
+
+            foreach (var (similarToken, score, freq, files) in rows)
+                table.AddRow(
+                    Markup.Escape(similarToken),
+                    score.ToString(),
+                    freq.ToString(),
+                    Markup.Escape(FormatFileList(files, vaultPath)));
+
+            AnsiConsole.Write(table);
+        }
+        else
+        {
+            AnsiConsole.WriteLine($"Similar to '{token}': {rows.Count} variant(s)");
+            AnsiConsole.WriteLine();
+            foreach (var (similarToken, score, freq, files) in rows)
+            {
+                AnsiConsole.WriteLine($"{similarToken}  score:{score}  freq:{freq}");
+                AnsiConsole.WriteLine($"  {FormatFileList(files, vaultPath)}");
+                AnsiConsole.WriteLine();
+            }
+        }
     }
 
     private static void RunAudit(
@@ -149,7 +170,8 @@ public sealed class SpellingsCommand : Command<SpellingsCommand.Settings>
         int frequencyThreshold,
         double misspellingRatio,
         string? typeFilter,
-        string? propertyFilter)
+        string? propertyFilter,
+        bool pretty)
     {
         var misspellings = fuzzyService.FindMisspellings(allTokens, frequencyThreshold, misspellingRatio);
 
@@ -159,33 +181,46 @@ public sealed class SpellingsCommand : Command<SpellingsCommand.Settings>
             return;
         }
 
-        var table = new Table()
-            .Border(TableBorder.Simple)
-            .Title("Likely Misspellings")
-            .AddColumn("Canonical")
-            .AddColumn(new TableColumn("Freq").RightAligned())
-            .AddColumn("Variant")
-            .AddColumn(new TableColumn("Freq").RightAligned())
-            .AddColumn("Files");
-
-        foreach (var (canonical, canonicalFreq, variant, variantFreq) in misspellings)
-        {
-            var files = ripgrepService.FilesContaining(searchRoots, variant)
+        List<string> GetFiles(string token) =>
+            ripgrepService.FilesContaining(searchRoots, token)
                 .Where(f => typeFilter is null ||
                             FmAliasExtractor.ReadProperty(f, "type")
                                 ?.Equals(typeFilter, StringComparison.OrdinalIgnoreCase) == true)
                 .Where(f => propertyFilter is null || FmAliasExtractor.HasProperty(f, propertyFilter))
                 .ToList();
-            var fileList = FormatFileList(files, vaultPath);
-            table.AddRow(
-                Markup.Escape(canonical),
-                canonicalFreq.ToString(),
-                Markup.Escape(variant),
-                variantFreq.ToString(),
-                Markup.Escape(fileList));
-        }
 
-        AnsiConsole.Write(table);
+        if (pretty)
+        {
+            var table = new Table()
+                .Border(TableBorder.Simple)
+                .Title("Likely Misspellings")
+                .AddColumn("Canonical")
+                .AddColumn(new TableColumn("Freq").RightAligned())
+                .AddColumn("Similar")
+                .AddColumn(new TableColumn("Freq").RightAligned())
+                .AddColumn("Files");
+
+            foreach (var (canonical, canonicalFreq, similar, similarFreq) in misspellings)
+                table.AddRow(
+                    Markup.Escape(canonical),
+                    canonicalFreq.ToString(),
+                    Markup.Escape(similar),
+                    similarFreq.ToString(),
+                    Markup.Escape(FormatFileList(GetFiles(similar), vaultPath)));
+
+            AnsiConsole.Write(table);
+        }
+        else
+        {
+            AnsiConsole.WriteLine($"Likely misspellings: {misspellings.Count} found");
+            AnsiConsole.WriteLine();
+            foreach (var (canonical, canonicalFreq, similar, similarFreq) in misspellings)
+            {
+                AnsiConsole.WriteLine($"'{similar}' (freq:{similarFreq}) → '{canonical}' (freq:{canonicalFreq})");
+                AnsiConsole.WriteLine($"  {FormatFileList(GetFiles(similar), vaultPath)}");
+                AnsiConsole.WriteLine();
+            }
+        }
     }
 
     private static string FormatFileList(IReadOnlyList<string> files, string vaultPath)

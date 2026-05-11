@@ -29,7 +29,7 @@ Run from the vault folder, or pass `--vault` to point at it explicitly.
 
 ```
 vault-search "query terms" [--top N] [--vault PATH] [--data PATH] [--rebuild]
-                           [--scope NAME] [--type VALUE] [--property NAME]
+                           [--scope NAME] [--type VALUE] [--property NAME] [--pretty]
 ```
 
 Searches the vault for files matching the query. Each term is fuzzy-expanded against the word list before searching, so near-matches are included automatically. Frontmatter `aliases:` properties are extracted at rebuild time and merged into query expansion.
@@ -43,14 +43,17 @@ Searches the vault for files matching the query. Each term is fuzzy-expanded aga
 | `--scope NAME` | — | Named search scope preset (loads `scope-<name>.txt`) |
 | `--type VALUE` | — | Filter results to files where frontmatter `type` matches this value |
 | `--property NAME` | — | Filter results to files that have this frontmatter property set (any value) |
+| `--pretty` | — | Render results as a formatted table instead of plain structured text |
 
 `--type` and `--property` are applied before the top N cutoff, so you always get up to N results from the matching set.
+
+By default, output is plain structured text (one result per block) suited for machine parsing. Use `--pretty` for a formatted table when running interactively.
 
 ### Spellings
 
 ```
 vault-search spellings [token] [--vault PATH] [--data PATH] [--threshold N]
-                               [--scope NAME] [--type VALUE] [--property NAME]
+                               [--scope NAME] [--type VALUE] [--property NAME] [--pretty]
 ```
 
 Without a token, audits the entire word list for likely misspellings — tokens that appear rarely and are similar to a much more frequent token. With a token, shows all similar variants of that specific word.
@@ -63,6 +66,7 @@ Without a token, audits the entire word list for likely misspellings — tokens 
 | `--scope NAME` | — | Named search scope preset |
 | `--type VALUE` | — | Filter file results by frontmatter `type` value |
 | `--property NAME` | — | Filter file results to files with this frontmatter property |
+| `--pretty` | — | Render results as a formatted table instead of plain structured text |
 
 ### Rebuild
 
