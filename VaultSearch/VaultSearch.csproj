@@ -6,6 +6,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AssemblyName>vault-search</AssemblyName>
+    <Version>1.2.0</Version>
     <PublishSingleFile>true</PublishSingleFile>
     <Company>Strange</Company>
     <Product>Vault Search</Product>
