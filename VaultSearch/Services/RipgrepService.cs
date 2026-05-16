@@ -3,7 +3,7 @@ using System.Text.Json;
 
 namespace VaultSearch.Services;
 
-public record RipgrepMatch(string FilePath, int LineNumber, string Line);
+public record RipgrepMatch(string FilePath, int LineNumber, string Line, IReadOnlyList<string> MatchedTerms);
 
 public class RipgrepService
 {
@@ -69,7 +69,13 @@ public class RipgrepService
                 var path = data.GetProperty("path").GetProperty("text").GetString() ?? "";
                 var lineNum = data.GetProperty("line_number").GetInt32();
                 var text = data.GetProperty("lines").GetProperty("text").GetString()?.Trim() ?? "";
-                matches.Add(new RipgrepMatch(path, lineNum, text));
+                var matchedTerms = new List<string>();
+                if (data.TryGetProperty("submatches", out var submatches))
+                    foreach (var sm in submatches.EnumerateArray())
+                        if (sm.TryGetProperty("match", out var matchProp) &&
+                            matchProp.TryGetProperty("text", out var matchText))
+                            matchedTerms.Add(matchText.GetString() ?? "");
+                matches.Add(new RipgrepMatch(path, lineNum, text, matchedTerms));
             }
             catch (KeyNotFoundException) { }
             catch (JsonException) { }

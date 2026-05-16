@@ -100,32 +100,114 @@ public sealed class SearchCommand : Command<SearchCommand.Settings>
         var searchRoots = searchScope.GetSearchRoots(vaultPath);
 
         var queryTokens = settings.Query.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        var expandedTerms = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var token in queryTokens)
+        // Phrase patterns: full query + all bigrams (for multi-token queries).
+        // ripgrep --fixed-strings matches literal space-containing strings line-by-line.
+        var phrases = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (queryTokens.Length > 1)
         {
-            foreach (var alias in aliasService.Expand(token))
-                expandedTerms.Add(alias);
-            foreach (var match in fuzzyService.ExpandQuery(token, allTokens))
-                expandedTerms.Add(match);
+            phrases.Add(string.Join(' ', queryTokens));
+            for (var i = 0; i < queryTokens.Length - 1; i++)
+                phrases.Add($"{queryTokens[i]} {queryTokens[i + 1]}");
         }
 
-        var matches = ripgrepService.Search(searchRoots, expandedTerms);
+        // Exact terms: literal query tokens + alias expansions.
+        var exactTerms = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var token in queryTokens)
+        {
+            exactTerms.Add(token);
+            foreach (var alias in aliasService.Expand(token))
+                exactTerms.Add(alias);
+        }
+
+        // Fuzzy terms: expansions that aren't already exact.
+        var fuzzyTerms = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var token in queryTokens)
+            foreach (var match in fuzzyService.ExpandQuery(token, allTokens))
+                if (!exactTerms.Contains(match) && !phrases.Contains(match))
+                    fuzzyTerms.Add(match);
+
+        var allTerms = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        allTerms.UnionWith(phrases);
+        allTerms.UnionWith(exactTerms);
+        allTerms.UnionWith(fuzzyTerms);
+
+        var matches = ripgrepService.Search(searchRoots, allTerms);
         if (matches.Count == 0)
         {
             AnsiConsole.MarkupLine("[yellow]No results found.[/]");
             return 0;
         }
 
-        var scored = matches
+        const long PhraseHitScore    = 1000L;
+        const long ExactHitScore     = 100L;
+        const long FuzzyHitScore     = 10L;
+        const long AllTokensBonus    = 500L;
+        const long FilenameMultiplier = 5L;
+
+        var scoredAll = matches
             .GroupBy(m => m.FilePath, StringComparer.OrdinalIgnoreCase)
-            .Select(g => (FilePath: g.Key, MatchCount: g.Count(), Excerpt: g.First().Line))
+            .Select(g =>
+            {
+                var filePath = g.Key;
+                var filename = Path.GetFileNameWithoutExtension(filePath);
+                long score = 0;
+                bool hasPhraseHit = false;
+                var coveredTokens = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+                foreach (var m in g)
+                {
+                    foreach (var term in m.MatchedTerms)
+                    {
+                        if (phrases.Contains(term))
+                        {
+                            score += PhraseHitScore;
+                            hasPhraseHit = true;
+                        }
+                        else if (exactTerms.Contains(term))
+                        {
+                            score += ExactHitScore;
+                            // Track which query tokens this term satisfies.
+                            foreach (var qt in queryTokens)
+                                if (term.Equals(qt, StringComparison.OrdinalIgnoreCase) ||
+                                    aliasService.Expand(qt).Any(a => a.Equals(term, StringComparison.OrdinalIgnoreCase)))
+                                    coveredTokens.Add(qt);
+                        }
+                        else
+                            score += FuzzyHitScore;
+                    }
+                }
+
+                // Bonus when the file contains at least one match for every query token.
+                if (queryTokens.Length > 1 && coveredTokens.Count == queryTokens.Length)
+                    score += AllTokensBonus;
+
+                // Filename bonus: check if phrase or any token appears in the filename.
+                foreach (var phrase in phrases)
+                    if (filename.Contains(phrase, StringComparison.OrdinalIgnoreCase))
+                        score += PhraseHitScore * FilenameMultiplier;
+                foreach (var token in queryTokens)
+                    if (filename.Contains(token, StringComparison.OrdinalIgnoreCase))
+                        score += ExactHitScore * FilenameMultiplier;
+
+                var hasExactHit = hasPhraseHit || coveredTokens.Count > 0
+                    || phrases.Any(p => filename.Contains(p, StringComparison.OrdinalIgnoreCase))
+                    || queryTokens.Any(t => filename.Contains(t, StringComparison.OrdinalIgnoreCase));
+
+                var excerpt = g.First().Line;
+                return (FilePath: filePath, Score: score, HasExactHit: hasExactHit, Excerpt: excerpt);
+            })
             .Where(r => settings.TypeFilter is null ||
                         FmAliasExtractor.ReadProperty(r.FilePath, "type")
                             ?.Equals(settings.TypeFilter, StringComparison.OrdinalIgnoreCase) == true)
             .Where(r => settings.PropertyFilter is null ||
                         FmAliasExtractor.HasProperty(r.FilePath, settings.PropertyFilter))
-            .OrderByDescending(r => r.MatchCount)
+            .ToList();
+
+        // Exact/phrase results fill slots first; fuzzy-only results backfill any remainder.
+        var scored = scoredAll
+            .Where(r => r.HasExactHit).OrderByDescending(r => r.Score)
+            .Concat(scoredAll.Where(r => !r.HasExactHit).OrderByDescending(r => r.Score))
             .Take(settings.Top)
             .ToList();
 
@@ -135,18 +217,18 @@ public sealed class SearchCommand : Command<SearchCommand.Settings>
                 .Border(TableBorder.Simple)
                 .AddColumn(new TableColumn("#").RightAligned())
                 .AddColumn("File")
-                .AddColumn(new TableColumn("Matches").RightAligned())
+                .AddColumn(new TableColumn("Score").RightAligned())
                 .AddColumn("Excerpt");
 
             for (var i = 0; i < scored.Count; i++)
             {
-                var (filePath, matchCount, excerpt) = scored[i];
+                var (filePath, score, _, excerpt) = scored[i];
                 var relativePath = Path.GetRelativePath(vaultPath, filePath);
                 var truncated = excerpt.Length > 80 ? excerpt[..77] + "..." : excerpt;
                 table.AddRow(
                     $"{i + 1}",
                     Markup.Escape(relativePath),
-                    matchCount.ToString(),
+                    score.ToString(),
                     Markup.Escape(truncated));
             }
 
@@ -156,9 +238,9 @@ public sealed class SearchCommand : Command<SearchCommand.Settings>
         {
             for (var i = 0; i < scored.Count; i++)
             {
-                var (filePath, matchCount, excerpt) = scored[i];
+                var (filePath, score, _, excerpt) = scored[i];
                 var relativePath = Path.GetRelativePath(vaultPath, filePath);
-                AnsiConsole.WriteLine($"{i + 1}. {relativePath} ({matchCount} matches)");
+                AnsiConsole.WriteLine($"{i + 1}. {relativePath} (score: {score})");
                 AnsiConsole.WriteLine($"   {excerpt}");
                 if (i < scored.Count - 1)
                     AnsiConsole.WriteLine();
