@@ -12,6 +12,10 @@ A fuzzy keyword search CLI for folders of markdown files. Designed for use with 
 - **Misspelling audit** — surface likely spelling variants across your vault
 - **Fast dirty check** — rebuilds the word list only when files have changed
 
+## How results are ranked
+
+Longer consecutive phrase matches score more than individual token matches — searching "growl fm" gives extra weight to files where those words appear together on the same line, and still more weight if all three words of "growl fm radio" appear consecutively. Exact matches always outrank fuzzy ones. Matches in the filename score higher than matches in content. Files with only fuzzy matches (no exact hit for any query token) backfill the list after all exact-match results.
+
 ## Requirements
 
 - [ripgrep](https://github.com/BurntSushi/ripgrep) (`rg`) on your PATH
@@ -167,4 +171,4 @@ Use `vault-search scopes` to list all available presets.
 4. **Scope** — if a named `--scope` is given, only the folders defined in that preset are searched; otherwise the default `scope.txt` applies
 5. **Search** — ripgrep searches the scoped folders for the expanded term set
 6. **Filter** — `--type` and `--property` filter results by frontmatter before the top N cutoff
-7. **Rank** — results are scored by number of matching terms and returned as a ranked table
+7. **Rank** — results are scored by match quality (phrase length, exact vs fuzzy, filename vs content) and returned in order; see *How results are ranked* above
