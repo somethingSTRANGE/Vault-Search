@@ -101,14 +101,22 @@ public sealed class SearchCommand : Command<SearchCommand.Settings>
 
         var queryTokens = settings.Query.Split(' ', StringSplitOptions.RemoveEmptyEntries);
 
-        // Phrase patterns: full query + all bigrams (for multi-token queries).
+        // All n-grams of length 2..N, each scored proportionally: token_count × BaseTokenScore.
         // ripgrep --fixed-strings matches literal space-containing strings line-by-line.
-        var phrases = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        const long BaseTokenScore    = 1000L;
+        const long FuzzyHitScore     = 10L;
+        const long AllTokensBonus    = 500L;
+        const long FilenameMultiplier = 5L;
+
+        var phraseScores = new Dictionary<string, long>(StringComparer.OrdinalIgnoreCase);
         if (queryTokens.Length > 1)
         {
-            phrases.Add(string.Join(' ', queryTokens));
-            for (var i = 0; i < queryTokens.Length - 1; i++)
-                phrases.Add($"{queryTokens[i]} {queryTokens[i + 1]}");
+            for (var len = 2; len <= queryTokens.Length; len++)
+                for (var start = 0; start <= queryTokens.Length - len; start++)
+                {
+                    var phrase = string.Join(' ', queryTokens[start..(start + len)]);
+                    phraseScores[phrase] = len * BaseTokenScore;
+                }
         }
 
         // Exact terms: literal query tokens + alias expansions.
@@ -120,15 +128,15 @@ public sealed class SearchCommand : Command<SearchCommand.Settings>
                 exactTerms.Add(alias);
         }
 
-        // Fuzzy terms: expansions that aren't already exact.
+        // Fuzzy terms: expansions that aren't already exact or a phrase.
         var fuzzyTerms = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var token in queryTokens)
             foreach (var match in fuzzyService.ExpandQuery(token, allTokens))
-                if (!exactTerms.Contains(match) && !phrases.Contains(match))
+                if (!exactTerms.Contains(match) && !phraseScores.ContainsKey(match))
                     fuzzyTerms.Add(match);
 
         var allTerms = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        allTerms.UnionWith(phrases);
+        allTerms.UnionWith(phraseScores.Keys);
         allTerms.UnionWith(exactTerms);
         allTerms.UnionWith(fuzzyTerms);
 
@@ -138,12 +146,6 @@ public sealed class SearchCommand : Command<SearchCommand.Settings>
             AnsiConsole.MarkupLine("[yellow]No results found.[/]");
             return 0;
         }
-
-        const long PhraseHitScore    = 1000L;
-        const long ExactHitScore     = 100L;
-        const long FuzzyHitScore     = 10L;
-        const long AllTokensBonus    = 500L;
-        const long FilenameMultiplier = 5L;
 
         var scoredAll = matches
             .GroupBy(m => m.FilePath, StringComparer.OrdinalIgnoreCase)
@@ -159,15 +161,32 @@ public sealed class SearchCommand : Command<SearchCommand.Settings>
                 {
                     foreach (var term in m.MatchedTerms)
                     {
-                        if (phrases.Contains(term))
+                        if (phraseScores.TryGetValue(term, out var phraseScore))
                         {
-                            score += PhraseHitScore;
+                            score += phraseScore;
                             hasPhraseHit = true;
+                            // Ripgrep returns only the longest non-overlapping match per position,
+                            // so constituent tokens and sub-phrases are never returned as separate
+                            // submatches. Credit them here so the full additive score is applied.
+                            var parts = term.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                            for (var len = 2; len < parts.Length; len++)
+                                for (var start = 0; start <= parts.Length - len; start++)
+                                {
+                                    var sub = string.Join(' ', parts[start..(start + len)]);
+                                    if (phraseScores.TryGetValue(sub, out var subScore))
+                                        score += subScore;
+                                }
+                            foreach (var pt in parts)
+                            {
+                                if (exactTerms.Contains(pt))
+                                    score += BaseTokenScore;
+                                if (queryTokens.Contains(pt, StringComparer.OrdinalIgnoreCase))
+                                    coveredTokens.Add(pt);
+                            }
                         }
                         else if (exactTerms.Contains(term))
                         {
-                            score += ExactHitScore;
-                            // Track which query tokens this term satisfies.
+                            score += BaseTokenScore;
                             foreach (var qt in queryTokens)
                                 if (term.Equals(qt, StringComparison.OrdinalIgnoreCase) ||
                                     aliasService.Expand(qt).Any(a => a.Equals(term, StringComparison.OrdinalIgnoreCase)))
@@ -178,20 +197,20 @@ public sealed class SearchCommand : Command<SearchCommand.Settings>
                     }
                 }
 
-                // Bonus when the file contains at least one match for every query token.
+                // Small bonus when all query tokens are covered (even non-consecutively).
                 if (queryTokens.Length > 1 && coveredTokens.Count == queryTokens.Length)
                     score += AllTokensBonus;
 
-                // Filename bonus: check if phrase or any token appears in the filename.
-                foreach (var phrase in phrases)
+                // Filename bonus using same proportional weights.
+                foreach (var (phrase, phraseScore) in phraseScores)
                     if (filename.Contains(phrase, StringComparison.OrdinalIgnoreCase))
-                        score += PhraseHitScore * FilenameMultiplier;
+                        score += phraseScore * FilenameMultiplier;
                 foreach (var token in queryTokens)
                     if (filename.Contains(token, StringComparison.OrdinalIgnoreCase))
-                        score += ExactHitScore * FilenameMultiplier;
+                        score += BaseTokenScore * FilenameMultiplier;
 
                 var hasExactHit = hasPhraseHit || coveredTokens.Count > 0
-                    || phrases.Any(p => filename.Contains(p, StringComparison.OrdinalIgnoreCase))
+                    || phraseScores.Keys.Any(p => filename.Contains(p, StringComparison.OrdinalIgnoreCase))
                     || queryTokens.Any(t => filename.Contains(t, StringComparison.OrdinalIgnoreCase));
 
                 var excerpt = g.First().Line;
