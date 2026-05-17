@@ -46,6 +46,14 @@ public sealed class SearchCommand : Command<SearchCommand.Settings>
         [CommandOption("--pretty")]
         [Description("Render results as a formatted table instead of plain structured text.")]
         public bool Pretty { get; init; }
+
+        [CommandOption("--light")]
+        [Description("Use light-terminal colors (dark text on light background) in plain output.")]
+        public bool LightTheme { get; init; }
+
+        [CommandOption("--no-ansi")]
+        [Description("Disable ANSI color codes in plain output.")]
+        public bool NoAnsi { get; init; }
     }
 
     protected override int Execute(CommandContext context, Settings settings, CancellationToken cancellationToken)
@@ -255,15 +263,21 @@ public sealed class SearchCommand : Command<SearchCommand.Settings>
         }
         else
         {
+            var useAnsi = !Console.IsOutputRedirected && !settings.NoAnsi;
+            var pathColor  = useAnsi ? (settings.LightTheme ? "\e[34m" : "\e[93m") : "";
+            var labelColor = useAnsi ? "\e[90m" : "";
+            var textColor  = useAnsi ? (settings.LightTheme ? "\e[30m" : "\e[37m") : "";
+            var reset      = useAnsi ? "\e[0m"  : "";
+
             for (var i = 0; i < scored.Count; i++)
             {
                 var (filePath, score, _, excerpt) = scored[i];
                 var relativePath = Path.GetRelativePath(vaultPath, filePath);
-                AnsiConsole.WriteLine(relativePath);
-                AnsiConsole.WriteLine($"score: {score}");
-                AnsiConsole.WriteLine($"excerpt: {excerpt}");
+                Console.WriteLine($"{pathColor}{relativePath}{reset}");
+                Console.WriteLine($"{labelColor}score:{reset} {textColor}{score}{reset}");
+                Console.WriteLine($"{labelColor}excerpt:{reset} {textColor}{excerpt}{reset}");
                 if (i < scored.Count - 1)
-                    AnsiConsole.WriteLine();
+                    Console.WriteLine();
             }
         }
 

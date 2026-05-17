@@ -33,7 +33,8 @@ Run from the vault folder, or pass `--vault` to point at it explicitly.
 
 ```
 vault-search "query terms" [--top N] [--vault PATH] [--data PATH] [--rebuild]
-                           [--scope NAME] [--type VALUE] [--property NAME] [--pretty]
+                           [--scope NAME] [--type VALUE] [--property NAME]
+                           [--pretty] [--light] [--no-ansi]
 ```
 
 Searches the vault for files matching the query. Each term is fuzzy-expanded against the word list before searching, so near-matches are included automatically. Frontmatter `aliases:` properties are extracted at rebuild time and merged into query expansion.
@@ -48,10 +49,12 @@ Searches the vault for files matching the query. Each term is fuzzy-expanded aga
 | `--type VALUE` | — | Filter results to files where frontmatter `type` matches this value |
 | `--property NAME` | — | Filter results to files that have this frontmatter property set (any value) |
 | `--pretty` | — | Render results as a formatted table instead of plain structured text |
+| `--light` | — | Use light-terminal colors (dark text on light background) in plain output |
+| `--no-ansi` | — | Disable ANSI color codes in plain output |
 
 `--type` and `--property` are applied before the top N cutoff, so you always get up to N results from the matching set.
 
-By default, output is plain structured text (one result per block) suited for machine parsing. Use `--pretty` for a formatted table when running interactively.
+By default, output is plain structured text (one result per block) suited for machine parsing. When writing to a real terminal, ANSI colors are applied automatically: the file path is highlighted for easy scanning and label text is dimmed. Colors are suppressed automatically when output is piped or redirected. Use `--no-ansi` to force plain output in a terminal, or `--light` to switch to a dark-on-light color scheme. Use `--pretty` for a formatted table when running interactively.
 
 ### Spellings
 
