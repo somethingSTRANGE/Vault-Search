@@ -259,8 +259,9 @@ public sealed class SearchCommand : Command<SearchCommand.Settings>
             {
                 var (filePath, score, _, excerpt) = scored[i];
                 var relativePath = Path.GetRelativePath(vaultPath, filePath);
-                AnsiConsole.WriteLine($"{i + 1}. {relativePath} (score: {score})");
-                AnsiConsole.WriteLine($"   {excerpt}");
+                AnsiConsole.WriteLine(relativePath);
+                AnsiConsole.WriteLine($"score: {score}");
+                AnsiConsole.WriteLine($"excerpt: {excerpt}");
                 if (i < scored.Count - 1)
                     AnsiConsole.WriteLine();
             }
