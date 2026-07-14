@@ -12,6 +12,7 @@
     <Company>Strange</Company>
     <Product>Vault Search</Product>
     <Description>Fuzzy keyword search CLI for folders of markdown files.</Description>
+    <Copyright>Copyright © 2026 Michael Ryan</Copyright>
   </PropertyGroup>
 
   <ItemGroup>
